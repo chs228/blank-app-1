@@ -5,6 +5,7 @@ from datetime import datetime
 # In-memory user data for authentication
 USERS = {
     "teacher": {"password": "teacher123", "role": "teacher"},
+    "student123":{"password": "student", "role": "student"}
 }
 
 # Allow students to create accounts dynamically
