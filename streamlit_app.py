@@ -1,187 +1,146 @@
 import streamlit as st
-import pandas as pd
+import google.generativeai as genai
+import joblib
+import time
+import os
+import random
 from datetime import datetime
 
-# In-memory user data for authentication
-USERS = {
-    "teacher": {"password": "teacher123", "role": "teacher"},
-    "student123":{"password": "student", "role": "student"}
-}
+# Configure Gemini AI
+genai.configure(api_key="AIzaSyB3gg0bJtByYb74TLY9cSSZnl84NoMXZqk")
+model = genai.GenerativeModel('gemini-pro')
 
-# Allow students to create accounts dynamically
-if "student_accounts" not in st.session_state:
-    st.session_state["student_accounts"] = {}
+def generate_content(prompt, topic):
+    response = model.generate_content(f"{prompt} about {topic}")
+    return response.text
 
-# Authentication function
-def authenticate(username, password):
-    user = USERS.get(username) or st.session_state["student_accounts"].get(username)
-    if user and user["password"] == password:
-        return user["role"]
-    return None
+def save_progress(username, progress):
+    joblib.dump(progress, f"{username}_progress.joblib")
 
-# Function to display the login page
-def login_page():
-    st.title("Login Page")
-    username = st.text_input("Username:")
-    password = st.text_input("Password:", type="password")
-    login_button = st.button("Login")
-    create_account_button = st.button("Create Student Account")
+def load_progress(username):
+    if os.path.exists(f"{username}_progress.joblib"):
+        return joblib.load(f"{username}_progress.joblib")
+    return {}
 
-    if login_button:
-        role = authenticate(username, password)
-        if role:
-            st.session_state["authenticated"] = True
-            st.session_state["role"] = role
-            st.session_state["username"] = username
-            st.success(f"Logged in as {role.capitalize()}!")
-        else:
-            st.error("Invalid username or password.")
+def generate_quiz(topic, level):
+    prompt = f"""Generate a multiple-choice quiz for level {level} students about {topic}.
+    Format:
+    Question: [Question text]
+    A. [Option A]
+    B. [Option B]
+    C. [Option C]
+    D. [Option D]
+    Correct Answer: [A/B/C/D]
+    Explanation: [Brief explanation of the correct answer]
 
-    if create_account_button:
-        new_username = st.text_input("New Username:", key="new_username")
-        new_password = st.text_input("New Password:", type="password", key="new_password")
-        if st.button("Create Account", key="create_account"):
-            if new_username in USERS or new_username in st.session_state["student_accounts"]:
-                st.error("Username already exists. Please choose a different username.")
-            else:
-                st.session_state["student_accounts"][new_username] = {
-                    "password": new_password,
-                    "role": "student",
-                }
-                st.success("Student account created successfully! You can now log in.")
+    Generate 3 questions in this format."""
 
-# Function to display the home page
-def home_page():
-    st.title("Quiz Management System")
-    st.markdown(
-        "Welcome to the Quiz Management System! Use the sidebar to navigate to different features of the application."
-    )
+    quiz_content = generate_content(prompt, topic)
+    return quiz_content.split("\n\n")
 
-# Function to create a quiz (accessible only to teachers)
-def create_quiz():
-    if st.session_state.get("role") != "teacher":
-        st.error("Access Denied: Only teachers can create quizzes.")
-        return
+def parse_quiz_question(question):
+    lines = question.split("\n")
+    return {
+        "question": lines[0].split(": ", 1)[1],
+        "options": {
+            "A": lines[1][3:],
+            "B": lines[2][3:],
+            "C": lines[3][3:],
+            "D": lines[4][3:],
+        },
+        "correct": lines[5].split(": ", 1)[1],
+        "explanation": lines[6].split(": ", 1)[1]
+    }
 
-    st.title("Create a Quiz")
+def main():
+    st.title("Gemini AI: Personalized Learning Companion")
 
-    quiz_name = st.text_input("Enter the Quiz Name:")
-    scheduled_date = st.date_input("Schedule Date:", min_value=datetime.today().date())
-    scheduled_time = st.time_input("Schedule Time:", value=datetime.now().time())
+    if 'username' not in st.session_state:
+        st.session_state.username = ''
 
-    st.subheader("Add Questions")
-    num_questions = st.number_input("Number of Questions:", min_value=1, max_value=50, step=1)
+    if not st.session_state.username:
+        st.session_state.username = st.text_input("Enter your username:")
 
-    questions = []
-    for i in range(1, num_questions + 1):
-        st.markdown(f"**Question {i}:**")
-        question = st.text_area(f"Enter Question {i}:")
-        option_a = st.text_input(f"Option A for Question {i}:")
-        option_b = st.text_input(f"Option B for Question {i}:")
-        option_c = st.text_input(f"Option C for Question {i}:")
-        option_d = st.text_input(f"Option D for Question {i}:")
-        correct_answer = st.selectbox(
-            f"Select Correct Answer for Question {i}:", ["A", "B", "C", "D"], key=f"answer_{i}"
-        )
+    if st.session_state.username:
+        progress = load_progress(st.session_state.username)
 
-        questions.append(
-            {
-                "question": question,
-                "options": {"A": option_a, "B": option_b, "C": option_c, "D": option_d},
-                "correct_answer": correct_answer,
-            }
-        )
+        st.sidebar.header("Learning Dashboard")
+        topic = st.sidebar.selectbox("Select a topic:", ["Math", "Science", "History", "Literature"])
 
-    if st.button("Save Quiz"):
-        quiz_data = {
-            "quiz_name": quiz_name,
-            "scheduled_date": scheduled_date,
-            "scheduled_time": scheduled_time,
-            "questions": questions,
-        }
-        st.success("Quiz saved successfully!")
-        st.json(quiz_data)  # Display saved quiz data for debugging
+        if topic:
+            if topic not in progress:
+                progress[topic] = {"level": 1, "score": 0, "last_study": None}
 
-# Function to display and manage scheduled quizzes (accessible only to teachers)
-def view_quizzes():
-    if st.session_state.get("role") != "teacher":
-        st.error("Access Denied: Only teachers can view and manage quizzes.")
-        return
+            level = progress[topic]["level"]
+            score = progress[topic]["score"]
+            last_study = progress[topic]["last_study"]
 
-    st.title("View Scheduled Quizzes")
+            st.sidebar.write(f"Current Level: {level}")
+            st.sidebar.write(f"Current Score: {score}/100")
+            if last_study:
+                st.sidebar.write(f"Last studied: {last_study}")
 
-    # Dummy data for illustration
-    quizzes = pd.DataFrame(
-        {
-            "Quiz Name": ["Math Test", "Science Quiz"],
-            "Scheduled Date": ["2024-12-27", "2024-12-28"],
-            "Scheduled Time": ["10:00 AM", "02:00 PM"],
-        }
-    )
+            tab1, tab2, tab3 = st.tabs(["Lesson", "Quiz", "AI Tutor"])
 
-    st.dataframe(quizzes)
+            with tab1:
+                st.header(f"Learning {topic}")
+                content = generate_content(f"Generate a comprehensive lesson for level {level} students", topic)
+                st.write(content)
 
-    st.markdown("### Actions")
-    selected_quiz = st.selectbox("Select a Quiz to Manage:", quizzes["Quiz Name"].tolist())
-    if st.button("Delete Selected Quiz"):
-        st.warning(f"Deleted quiz: {selected_quiz}")
+                if st.button("Mark as Completed"):
+                    progress[topic]["score"] += 5
+                    progress[topic]["last_study"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    st.success("Lesson marked as completed! +5 points")
 
-# Function to display quizzes for students
-def student_quizzes():
-    if st.session_state.get("role") != "student":
-        st.error("Access Denied: Only students can view and attempt quizzes.")
-        return
+            with tab2:
+                st.header("Quiz Time!")
+                if 'current_quiz' not in st.session_state:
+                    st.session_state.current_quiz = generate_quiz(topic, level)
+                    st.session_state.quiz_index = 0
+                    st.session_state.quiz_score = 0
 
-    st.title("Take a Quiz")
+                if st.session_state.quiz_index < len(st.session_state.current_quiz):
+                    question = parse_quiz_question(st.session_state.current_quiz[st.session_state.quiz_index])
+                    st.write(question["question"])
+                    user_answer = st.radio("Select your answer:", list(question["options"].keys()), format_func=lambda x: question["options"][x])
 
-    # Dummy quiz data for students
-    quizzes = ["Math Test", "Science Quiz"]
-    selected_quiz = st.selectbox("Select a Quiz to Take:", quizzes)
+                    if st.button("Submit Answer"):
+                        if user_answer == question["correct"]:
+                            st.success("Correct! " + question["explanation"])
+                            st.session_state.quiz_score += 1
+                        else:
+                            st.error(f"Incorrect. The correct answer is {question['correct']}. " + question["explanation"])
+                        st.session_state.quiz_index += 1
 
-    st.markdown(f"### Quiz: {selected_quiz}")
-    st.markdown("(Quiz functionality can be implemented here.)")
+                        if st.session_state.quiz_index >= len(st.session_state.current_quiz):
+                            final_score = st.session_state.quiz_score / len(st.session_state.current_quiz) * 100
+                            st.write(f"Quiz completed! Your score: {final_score:.2f}%")
+                            progress[topic]["score"] += int(final_score / 2)
+                            if progress[topic]["score"] >= 100:
+                                progress[topic]["level"] += 1
+                                progress[topic]["score"] = 0
+                                st.balloons()
+                                st.success(f"Congratulations! You've advanced to level {progress[topic]['level']}!")
+                            del st.session_state.current_quiz
+                else:
+                    if st.button("Take Another Quiz"):
+                        del st.session_state.current_quiz
+                        st.experimental_rerun()
 
-# Function to display results (accessible to all users)
-def view_results():
-    st.title("View Results")
+            with tab3:
+                st.header("Chat with AI Tutor")
+                user_question = st.text_input("Ask your question:")
+                if user_question:
+                    response = generate_content(f"As a knowledgeable and patient tutor, answer the following question about {topic} for a level {level} student: {user_question}", topic)
+                    st.write("AI Tutor:")
+                    st.write(response)
 
-    # Dummy results data
-    results = pd.DataFrame(
-        {
-            "Student Name": ["Alice", "Bob"],
-            "Quiz Name": ["Math Test", "Science Quiz"],
-            "Score": ["80%", "90%"],
-        }
-    )
+            save_progress(st.session_state.username, progress)
 
-    st.dataframe(results)
+        st.sidebar.markdown("---")
+        if st.sidebar.button("Log Out"):
+            st.session_state.username = ''
+            st.experimental_rerun()
 
-# Streamlit sidebar navigation
-if "authenticated" not in st.session_state:
-    st.session_state["authenticated"] = False
-    st.session_state["role"] = None
-    st.session_state["username"] = None
-
-if not st.session_state["authenticated"]:
-    login_page()
-else:
-    st.sidebar.title("Navigation")
-    option = st.sidebar.radio(
-        "Go to:", ["Home", "Create Quiz", "View Quizzes", "Take Quiz", "View Results", "Logout"]
-    )
-
-    if option == "Home":
-        home_page()
-    elif option == "Create Quiz":
-        create_quiz()
-    elif option == "View Quizzes":
-        view_quizzes()
-    elif option == "Take Quiz":
-        student_quizzes()
-    elif option == "View Results":
-        view_results()
-    elif option == "Logout":
-        st.session_state["authenticated"] = False
-        st.session_state["role"] = None
-        st.session_state["username"] = None
-        st.success("Logged out successfully!")
+if __name__ == "__main__":
+    main()
