@@ -7,7 +7,7 @@ import random
 from datetime import datetime
 
 # Configure Gemini AI
-genai.configure(api_key="AIzaSyB3gg0bJtByYb74TLY9cSSZnl84NoMXZqk")
+genai.configure(api_key="")
 model = genai.GenerativeModel('gemini-pro')
 
 def generate_content(prompt, topic):
