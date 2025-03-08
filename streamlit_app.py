@@ -8,7 +8,7 @@ from datetime import datetime
 
 # Configure Gemini AI
 genai.configure(api_key="AIzaSyCx70_PG_V6tkCsarNnIP9qs_fl5THZIMI")
-model = genai.GenerativeModel('gemini-pro')
+model = genai.GenerativeModel('gemini-2.0-flash')
 
 def generate_content(prompt, topic):
     response = model.generate_content(f"{prompt} about {topic}")
